@@ -8,24 +8,19 @@ Synopsis:
     value = reader.read()
 """
 import datetime
-import math
 import os
 import os.path
 import shutil
 from datetime import datetime
 from itertools import pairwise
+from math import isclose, degrees
+from sys import float_info
 
 import numpy as np
 
-# import sys
-# SITE_PACKAGES = '/usr/lib64/python3.12/site-packages'
-# if SITE_PACKAGES not in sys.path:
-#    sys.path.append(SITE_PACKAGES)
-
 from .config import Config
-from .util import *
 from .debug import Debug
-from .scale import Scale
+from .util import *
 
 
 class GaugeReader:
@@ -41,7 +36,7 @@ class GaugeReader:
         self.config = Config
 
         # Debugging
-        self.d = Debug('reader', log)
+        self.d = Debug(log, no_im_show)
 
         # Load the gauge image
         img = cv.imread(img_file)
@@ -55,47 +50,30 @@ class GaugeReader:
 
         # A copies of the original image
         self.img = np.copy(img)      # for processing
-        self.img_debug = np.copy(img)     # for debug drawings
-
-        # Calibration
-        self.cal_seg_len = 0
-        self.needle_area = 0
+        self.img_d = np.copy(img)     # for debug drawings
 
         self.scale = None
+        self.center: tuple[float, float] = (0.0, 0.0)
+        self.radius: float = 0.0
+        self.zero_angle: float = 0.0
 
         #self.log.debug(f'opencv: {cv.__version__}')
         #self.log.debug(f'numpy: {np.__version__}')
 
-    def read(self) -> str | None:
+    def exec(self) -> str | None:
         """
         The main method that performs the recognition
         """
 
-        #
-        # Recognize the dial scale
-        #
-
-        self.scale = Scale(self.img, self.img_debug, self.log)
-        if not self.scale.exec():
-            return None
-
-        scale_area = pi * self.scale.radius**2
-        self.needle_area = self.config.needle_area * scale_area
-
-        self.log.debug(f'scale area: {scale_area:.2f} px²')
-        self.log.debug(f'mean needle area: {self.needle_area:.2f} px²')
-
-        #
-        # Find the needle
-        #
-
+        # Preprocess the gauge image and outline it
         self._preproc_image()
+        marks, needle = self._outline_dial_()
 
-        needle_contour = self._find_needle()
-        if needle_contour is None:
-            return None
+        # Prepare the scale table
+        marks = self._interpolate_missing_marks(marks)
+        self.scale = self._generate_scale_table(marks)
 
-        angle = self._measure_needle(needle_contour)
+        angle = self._measure_needle_angle(needle.contour)
         if angle is None:
             return None
 
@@ -106,10 +84,9 @@ class GaugeReader:
         value = f'{value:4.2f}'
 
         # Put the value on the image
-        if img := self.d.img(self.img_debug, 'read/values'):
+        with self.d.img(self.img_d, 'exec/values') as img:
             pos = Point(rint(self.img_w * self.config.text_pos[0]), rint(self.img_h * self.config.text_pos[1]))
             img.text_h_centered(position=pos, text=f'{value}', font=FONT, scale=2, color=COLOR_GREEN, thickness=5)
-            img.show()
 
         return value
 
@@ -117,70 +94,245 @@ class GaugeReader:
         """
         Performs some image transforms to prepare it for the recognition
         """
-        self.img = bright_contr(self.img, 50, 100)
-        self.d.show(self.img, 'prep/brt_cont')
+        self.d.show(self.img, 'prep/orig')
 
-        self.img = cv.medianBlur(self.img, self.config.needle.blur)
-        self.d.show(self.img, 'prep/blur')
+        if self.config.scale.blur is not None:
+            self.img = cv.medianBlur(self.img, self.config.scale.blur)
+            self.d.show(self.img, 'prep/blur')
+
+        if self.config.scale.brightness is not None:
+            self.img = bright_contr(self.img, self.config.scale.brightness, self.config.scale.contrast)
+            self.d.show(self.img, 'prep/brt_cont')
+
+        # https://forum.openframeworks.cc/t/levels-with-opencv/1314/2
+        # https://stackoverflow.com/questions/12023958/what-does-cvnormalize-src-dst-0-255-norm-minmax-cv-8uc1
+        # https://stackoverflow.com/questions/42169247/apply-opencv-look-up-table-lut-to-an-image
+        lut = np.zeros(256, np.dtype('uint8'))
+        for i in range(0, 256):
+            if i < self.config.scale.lut_min:
+                v = 0
+            elif i > self.config.scale.lut_max:
+                v = 255
+            else:
+                v = rint(255 / (self.config.scale.lut_max - self.config.scale.lut_min) * (i - self.config.scale.lut_min))
+            lut[i] = v
+
+        self.img = cv.LUT(self.img, lut)
+        self.d.show(self.img, 'prep/lut')
+
+        self.img = cv.pyrMeanShiftFiltering(self.img, self.config.scale.mean_sp, self.config.scale.mean_sr)
+        self.d.show(self.img, 'prep/mean')
+
 
         # Apply a threshold filter
-        _, self.img = cv.threshold(self.img, self.config.needle.thresh, self.config.needle.thresh_maxval,
-                                   cv.ADAPTIVE_THRESH_GAUSSIAN_C)
-        # self.img_proc = cv.bitwise_not(self.img_proc)
+        # https://docs.opencv.org/4.x/d7/d4d/tutorial_py_thresholding.html
         self.img = cv.cvtColor(self.img, cv.COLOR_BGR2GRAY)
+        self.img = cv.adaptiveThreshold(self.img, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                            cv.THRESH_BINARY, 15, 4)
         self.d.show(self.img, 'prep/thresh')
 
-        kernel = np.ones((7, 7), np.uint8)
-        self.img = cv.erode(self.img, kernel, iterations=2)
-        self.d.show(self.img, 'prep/erode')
+        if self.config.scale.erode_iters is not None:
+            kernel = np.ones((3, 3), np.uint8)
+            self.img = cv.dilate(self.img, kernel, iterations=self.config.scale.erode_iters)
+            self.d.show(self.img, 'prep/erode')
 
-        self.img = cv.dilate(self.img, kernel, iterations=2)
-        self.d.show(self.img, 'prep/dilate')
-
-    def _find_needle(self) -> np.ndarray | None:
-        """
-        Finds the needle, measures and returns its angle
+    def _od_find_contours(self):
         """
 
-        # Find contours
-        self.log.debug('finding contours...')
-        contours, _ = cv.findContours(image=self.img, mode=cv.RETR_LIST, method=cv.CHAIN_APPROX_SIMPLE)
-        self.log.debug(f'{len(contours)} contour(s) found')
+        """
+        contours, _ = cv.findContours(self.img, mode=cv.RETR_LIST, method=cv.CHAIN_APPROX_SIMPLE)
+        # cnts = cnts[0] if len(cnts) == 2 else cnts[1]
 
-        if img := self.d.img(self.img_debug, 'find_needle/all_contours'):
-            img.drawContours(contours, -1, COLOR_BLUE, 2, 0)
-            img.show()
+        # Debug: draw all found contours
+        with self.d.img(self.img_d, 'outline_dial/all_contours') as img:
+            img.drawContours(contours, -1, COLOR_BLUE, 1, cv.LINE_AA)
 
-        cal_contours = []
+        return contours
 
-        # Evaluate each contour
-        self.log.debug('evaluating contours (skipping those with area ≤ 500 px²)...')
-        for i, contour in enumerate(contours):
-
-            # Skip too small and too large areas
-            cnt_area = cv.contourArea(contour)
-            if cnt_area <= 500:
+    def _od_select_contours(self, contours):
+        figures = []
+        for c in contours:
+            if c.size < 8:
                 continue
 
-            if isclose(cnt_area, self.needle_area, rel_tol=self.config.needle_area_tol):
-                # Accept the first contour that has the expected area
-                needle_contour = contour
-                break
+            mark = Figure(c)
 
-            self.log.debug(f'contour {i}: {cnt_area} px² - skipped')
+            if mark.box_area < 100:
+                continue
+            if not 0.09 <= mark.box_ratio <= 0.29:
+                continue
 
-        else:
-            self.log.error('No acceptable contours found')
-            return None
+            figures.append(mark)
 
-        self.log.debug(f'contour {i}: {cnt_area} px² - accepted as needle')
-        if img := self.d.img(self.img_debug, 'find_needle/accepted_contours'):
-            img.drawContours(cal_contours + [needle_contour], -1, COLOR_BLUE, 1, cv.LINE_AA)
-            img.show()
+        # Debug: Draw accepted contours
+        with self.d.img(self.img_d, 'outline_dial/accepted_contours') as img:
+            for f in figures:
+                img.drawContours([f.contour], -1, COLOR_BLUE, 1, cv.LINE_AA)
+                # img.text(f'{rint(f.rect_area)}/{f.rect_ratio:.2f}', m.contour[0][0], FONT, .5, COLOR_WHITE)
+
+        return figures
+
+    def _od_extract_needle(self, figures):
+        """
+
+        """
+        median = np.median([f.box_area for f in figures])
+        self.log.debug(f'Median of box areas is {median:.2f}')
+
+        candidates = []
+        for i in range(len(figures)-1, -1, -1):
+            f = figures[i]
+            if f.box_area / median > 150:
+                candidates.append(f)
+                del figures[i]
+                continue
+            if not 0.5 <= f.box_area / median <= 5.0:
+                del figures[i]
+
+        # Debug: draw the accepted marks
+        with self.d.img(self.img_d, 'outline_dial/accepted_marks') as img:
+            for f in figures:
+                img.drawContours([f.contour], -1, COLOR_BLUE, 1, cv.LINE_AA)
+                # img.text(f'{rint(f.rect_area)}/{f.rect_ratio:.2f}', m.contour[0][0], FONT, .5, COLOR_WHITE)
+
+        # Debug: Draw needle candidates
+        with self.d.img(self.img_d, 'outline_dial/needle_candidates') as img:
+            img.drawContours([f.contour for f in candidates], -1, COLOR_BLUE, 1, cv.LINE_AA)
+
+        #
+        min_area = float_info.max
+        needle_contour = None
+        for i, m in enumerate(candidates):
+            if m.contour_area < min_area:
+                min_area = m.contour_area
+                needle_contour = m
+
+        # Debug: draw the chosen needle contour
+        with self.d.img(self.img_d, 'outline_dial/needle_contour') as img:
+            img.drawContours([needle_contour.contour], -1, COLOR_YELLOW, 1, cv.LINE_AA)
 
         return needle_contour
 
-    def _measure_needle(self, contour: np.ndarray) -> (float, Line, np.ndarray, Point, Point):
+    def _od_find_enclosing_circle(self, figures):
+        """
+        Find an enclosing circle for the center points of the selected rectangles
+        """
+        points = np.array([f.center for f in figures]).astype(int)
+        center, radius = cv.minEnclosingCircle(points)
+
+        # Debug: Draw the enclosing circle
+        with self.d.img(self.img_d, 'outline_dial/circle') as img:
+            img.circle(tuple(map(round, center)), rint(radius), COLOR_GREEN, 1, cv.LINE_AA)
+            img.circle(tuple(map(round, center)), 3, COLOR_GREEN, 1, cv.LINE_AA)
+
+        return center, radius
+
+    def _od_remove_displaced_figs(self, figures):
+        """
+        Remove rectangles whose centers are not lying close to the circle
+        """
+        marks = []
+        for i in range(len(figures)-1, -1, -1):
+            f = figures[i]
+            if not isclose(distance(self.center, f.center), self.radius, rel_tol=0.1):
+                del figures[i]
+                continue
+
+            cart_angle = angle360(self.center, f.center)
+            loc_angle = cart_angle_to_loc(cart_angle)
+            marks.append(Mark(f.center, cart_angle, loc_angle, f.box))
+
+        return marks
+
+    def _outline_dial_(self):
+        """
+        Links
+            https://theailearner.com/2020/11/03/opencv-minimum-area-rectangle/
+            https://stackoverflow.com/questions/15956124/minarearect-angles-unsure-about-the-angle-returned
+            https://github.com/opencv/opencv/issues/19472
+            https://docs.opencv.org/4.x/d9/d8b/tutorial_py_contours_hierarchy.html
+            https://medium.com/analytics-vidhya/opencv-findcontours-detailed-guide-692ee19eeb18
+        """
+        # Find contours
+        contours = self._od_find_contours()
+
+        # Choose contours by their enclosing rectangle's proportions
+        figures = self._od_select_contours(contours)
+
+        # Extract large figures from the list and choose a needle among them
+        needle = self._od_extract_needle(figures)
+
+        # Find an enclosing circle for the center points of the selected rectangles
+        self.center, self.radius = self._od_find_enclosing_circle(figures)
+
+        # Remove figures whose centers are not lying close to the circle
+        marks = self._od_remove_displaced_figs(figures)
+
+        # Sort the mark list by the loc_angle in the ascending order
+        marks.sort(key=lambda e: e.loc_angle)
+
+        return marks, needle
+
+    def _interpolate_missing_marks(self, marks):
+        """
+        Interpolate missing marks
+        """
+        avg_mark_delta = self.config.full_scale_angle / (rint(self.config.max_mark / self.config.mark_step) - 1)
+        self.log.debug(f'Average angle between marks: {avg_mark_delta:.2f}')
+
+        # Interpolate a zero mark
+        self.zero_angle = marks[0].loc_angle - avg_mark_delta
+        cart_angle = marks[0].cart_angle + avg_mark_delta
+        marks.insert(0, Mark(point=cross(self.center, self.radius, cart_angle),
+                                 cart_angle=cart_angle, loc_angle=self.zero_angle))
+
+        self.log.debug(f'Added a zero mark at angle {self.zero_angle}')
+
+        # One mark may be missed because it is covered with the needle, so we need to interpolate it
+        for i, (a1, a2) in enumerate(pairwise(marks[:])):
+            delta = a2.loc_angle - a1.loc_angle
+            if not isclose(delta, avg_mark_delta, rel_tol=0.1):
+                d = delta / 2
+                cart_angle = a1.cart_angle - d
+                mark = Mark(point=cross(self.center, self.radius, cart_angle),
+                            cart_angle=cart_angle, loc_angle=a1.loc_angle + d)
+                marks.insert(i + 1, mark)
+                self.log.debug(f'Added a missing mark at angle {mark.loc_angle:.2f}')
+
+        # Debug: draw the accepted marks
+        with self.d.img(self.img_d, 'outline_dial/marks') as img:
+            for m in marks:
+                #img.drawContours([m.box], -1, COLOR_YELLOW, 1, cv.LINE_AA)
+                img.circle(m.point, 3, COLOR_YELLOW, 1, cv.LINE_AA)
+
+        # A basic check
+        if (_l := len(marks)) != (_n := rint(self.config.max_mark / self.config.mark_step)):
+            self.log.error(f'{_n} dial marks are expected but {_l} found')
+            return None
+
+        # Debug: draw the mark's axes
+        with self.d.img(self.img_d, 'outline_dial/axes') as img:
+            for mark in marks:
+                color = COLOR_MAGENTA if mark.box is not None else COLOR_DARK_MAGENTA
+                img.line_polar(self.radius + 25, mark.cart_angle, self.center, color, 1)
+                img.text(text=f'{mark.loc_angle:.2f}', org=mark.point, fontFace=FONT, fontScale=0.5,
+                         color=color, thickness=1, shift=(10, 5))
+
+        return marks
+
+    def _generate_scale_table(self, marks):
+        """
+
+        """
+        scale = {0.0: self.config.mark_step}
+        value = self.config.first_mark
+        for mark in marks[1:]:
+            scale[mark.loc_angle - self.zero_angle] = round(value, 1)
+            value += self.config.mark_step
+
+        return scale
+
+    def _measure_needle_angle(self, contour: np.ndarray) -> float:
         """
         Find the needle tip
         """
@@ -204,21 +356,19 @@ class GaugeReader:
         # The vector returned by cv.fitLine() is always in range (90°, -90°)
         # in the image's coordinate system ( 0 ≤ x ≤ 1>, -1 ≤ y ≤ 1)
         # so we need to take into account the tip position to determine the line direction
-        angle = math.degrees(math.atan2(-vy, vx))
+        angle = degrees(atan2(-vy, vx))
         if tip.x < x:
             angle += 180
 
         self.log.debug(f'measured needle angle: {angle:.6f}°')
 
-        if img := self.d.img(self.img_debug, 'measure_needle/axis'):
+        with self.d.img(self.img_d, 'measure_needle/axis') as img:
             img.line(axis.p1, axis.p2, COLOR_RED, 1, cv.LINE_AA)
             img.circle((x, y), 3, COLOR_RED, 1, cv.LINE_AA)
-            img.show()
 
-        if img := self.d.img(self.img_debug, 'measure_needle/triangle'):
+        with self.d.img(self.img_d, 'measure_needle/triangle'):
             img.polylines([np.int32(triangle)], True, COLOR_YELLOW, 1)
             img.circle(tip, 3, COLOR_YELLOW, 1)
-            img.show()
 
         return angle
 
@@ -242,18 +392,18 @@ class GaugeReader:
         Calculates the value the needle points to
         """
 
-        rel_angle = self.scale.cart_angle_to_loc(abs_angle) - self.scale.zero_angle
+        rel_angle = cart_angle_to_loc(abs_angle) - self.zero_angle
         self.log.debug(f'needle angle: absolute {abs_angle:0.6f}°, relative {rel_angle:0.6f}°')
 
-        if self.scale.scale[0] > rel_angle > self.scale.scale[-1]:
-            self.log.warning(f'Detected angle {rel_angle} is out of range {self.scale.scale[0]}-{self.scale.scale[-1]}')
+        if self.scale[0] > rel_angle > self.scale[-1]:
+            self.log.warning(f'Detected angle {rel_angle} is out of range {self.scale[0]}-{self.scale[-1]}')
             return None
 
         value = 0.0
-        for a1, a2 in pairwise(self.scale.scale):
+        for a1, a2 in pairwise(self.scale):
             if a1 < rel_angle <= a2:
-                v1 = self.scale.scale[a1]
-                v2 = self.scale.scale[a2]
+                v1 = self.scale[a1]
+                v2 = self.scale[a2]
 
                 # the angle falls between a1 and a2; approximate the value
                 value = (rel_angle - a1) / (a2 - a1) * (v2 - v1) + v1
@@ -278,7 +428,7 @@ class GaugeReader:
             save_dir = path
         file_name = f'{save_dir}/{name}{suffix}{ext}'
 
-        cv.imwrite(file_name, self.img_debug)
+        cv.imwrite(file_name, self.img_d)
 
         stat = os.stat(self.img_file)
         os.utime(file_name, (stat.st_atime, stat.st_mtime))
@@ -303,7 +453,7 @@ def read_pressure(*args):
     except RuntimeError:
         return None
 
-    value = reader.read()
+    value = reader.exec()
     reader.save_debug_image(suffix='-debug')
     # if value is None:
     #     # copy the image if it couldn't be recognized

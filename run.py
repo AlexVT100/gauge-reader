@@ -32,7 +32,7 @@ if __name__ == '__main__':
         log.info(f'Processing {image}')
 
         reader = GaugeReader(log, image)
-        value = reader.read()
+        value = reader.exec()
         reader.save_debug_image(suffix='-debug')
 
         if value is None:

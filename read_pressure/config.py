@@ -22,18 +22,29 @@ Config = SimpleNamespace(
     text_pos=(0.5, 0.7),  # relatively to the image size
 
     scale=SimpleNamespace(
-        brightness=50,
-        contrast=110,
-        blur=7,
+        blur=3,
+        brightness=20,
+        contrast=0,
+        lut_min=70,
+        lut_max=200,
         mean_sp=11,
         mean_sr=21,
-        thresh=80,
-        thresh_maxval=255,
-        erode_iters=1,
-    ),
-    needle=SimpleNamespace(
-        blur=7,
-        thresh=65,
-        thresh_maxval=255
+        thresh=110,
+        thresh_maxval=200,
+        erode_iters=None,
     ),
 )
+
+MarkRatios = {
+    None: {     # No erode
+        '0.0': [0.09, 0.29],
+        #'0.1': [0.13, 0.23],
+        #'0.5': [0.09, 0.12],
+        #'1.0': [0.25, 0.27],
+    },
+    1: {        # Erode 1 iteration
+        '0.1': [0.12, 0.22],
+        '0.5': [0.08, 0.11],
+        '1.0': [0.25, 0.4],
+    },
+}
