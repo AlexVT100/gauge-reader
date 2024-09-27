@@ -1,0 +1,160 @@
+import cv2
+
+from .util import *
+
+# 0 - skip
+# 1 - draw
+# 2 - draw and show
+
+debug_conf = {
+    'scale': {
+        'prep': {
+            'brt_cont':         0,
+            'blur':             0,
+            'mean':             0,
+            'thresh':           0,
+            'erode':            0,
+        },
+        'find_scale': {
+            'all_contours':         0,
+            'accepted_contours':    0,
+            'circle':               0,
+            'marks':                0,
+            'axes':                 0,
+        },
+    },
+
+    'reader': {
+        'prep': {
+            'brt_cont':          0,
+            'blur':              0,
+            'thresh':            0,
+            'erode':             0,
+            'dilate':            0,
+        },
+
+        'find_needle': {
+            'all_contours':      0,
+            'accepted_contours': 0,
+        },
+
+        'measure_needle': {
+            'axis':              1,
+            'triangle':          1,
+        },
+
+        'read': {
+            'scale':             1,
+            'values':            1,
+        },
+    },
+}
+
+
+class DebugImage:
+    """
+    Debugging image handling
+    """
+    def __init__(self, img, func: str, name: str, show: bool):
+        self._func = func
+        self._name = name
+        self._show = show
+        self._img = img
+
+    def line(self, pt1, pt2, color, thickness=None, line_type=cv2.LINE_AA, shift=None) -> None:
+        cv.line(self._img, pt1, pt2, color, thickness, line_type, shift)
+
+    def circle(self, center, radius, color, thickness=None, line_type=cv2.LINE_AA, shift=None) -> None:
+        cv.circle(self._img, (rint(center[0]), rint(center[1])), radius, color, thickness, line_type, shift)
+
+    # noinspection PyPep8Naming
+    def drawContours(self, contours, contourIdx, color, thickness=None, lineType=cv2.LINE_AA,
+                     hierarchy=None, maxLevel=None, offset=None) -> None:
+        cv.drawContours(self._img, contours, contourIdx, color, thickness, lineType, hierarchy, maxLevel, offset)
+
+    def line_polar(self, length, angle, point: tuple, color: tuple, thickness: int, line_type: int = cv2.LINE_AA):
+        # pylint: disable=too-many-arguments
+        """
+        Draws a line defined in polar coordinates
+        """
+        x, y = cv.polarToCart(length, angle=angle, x=point[0], y=point[1], angleInDegrees=True)
+
+        p2 = (rint(x[0][0]), rint(y[0][0]))
+        point = (rint(point[0]), rint(point[1]))
+        p2 = p2[0] + point[0], point[1] - p2[1]
+
+        cv.line(self._img, point, p2, color, thickness, line_type)
+
+    # noinspection PyPep8Naming
+    def text(self, text, org, fontFace, fontScale, color, thickness=None, lineType=cv2.LINE_AA,
+             bottomLeftOrigin=None, shift=None):
+        if shift is not None:
+            org = (org[0] + shift[0], org[1] + shift[1])
+        return cv.putText(self._img, text, (rint(org[0]), rint(org[1])), fontFace, fontScale, color,
+                          thickness, lineType, bottomLeftOrigin)
+
+    def text_h_centered(self, position, text, font, scale, color, thickness, v_shift=0):
+        # pylint: disable=too-many-arguments
+        """
+        Draws horizontally-centered text
+        """
+        size = cv.getTextSize(text, font, scale, thickness)[0]
+        x = rint(position.x - size[0] / 2)
+        y = rint(position.y + v_shift)
+
+        cv.putText(img=self._img, text=text, org=(x, y), fontFace=font, fontScale=scale, color=color,
+                   thickness=thickness)
+
+    # noinspection PyPep8Naming
+    def polylines(self, pts, isClosed, color, thickness=None, lineType=cv2.LINE_AA, shift=None):
+        return cv.polylines(self._img, pts, isClosed, color, thickness, lineType, shift)
+
+    def show(self):
+        """
+        Shows <image> if enabled; does nothing oterwise
+        """
+        if self._show:
+            cv.imshow(self._func + '():' + self._name, self._img)
+            cv.waitKey(0)
+            cv.destroyAllWindows()
+
+
+class Debug:
+    def __init__(self, topic, logger):
+        self.conf = debug_conf[topic]
+        self.log = logger
+
+    def img(self, img, key: str):
+        """
+        Check if the debugging drawing and viewing are enabled.
+
+        Returns:
+            - None if drawing for <name> is disabled (==0) or <name> does not exist in the debug configuration
+            - DebugImage(name) instance otherwise
+        """
+        parts = key.split('/', 2)
+        if len(parts) < 2:
+            self.log.error(f'_d(): wrong debug key format: "{key}"')
+            return None
+
+        func, name = parts[0:2]
+
+        if func not in self.conf:
+            self.log.error(f'_d(): debug configuration for function "{func}" is not defined')
+            return None
+
+        if name not in self.conf[func]:
+            self.log.error(f'_d(): name "{name}" in function "{func}" is not defined')
+            return None
+
+        if self.conf[func][name] == 0:
+            return None
+
+        return DebugImage(img, func, name, self.conf[func][name] == 2)
+
+    def show(self, img, name):
+        """
+        Shows the given image if showing is enabled or does nothing otherwise
+        """
+        if d := self.img(img, name):
+            d.show()
