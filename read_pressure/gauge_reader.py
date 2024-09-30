@@ -159,7 +159,7 @@ class GaugeReader:
 
             if mark.box_area < 100:
                 continue
-            if not 0.09 <= mark.box_ratio <= 0.29:
+            if not 0.09 <= mark.box_ratio <= 0.28:
                 continue
 
             figures.append(mark)
@@ -168,7 +168,7 @@ class GaugeReader:
         with self.d.img(self.img_d, 'outline_dial/accepted_contours') as img:
             for f in figures:
                 img.drawContours([f.contour], -1, COLOR_BLUE, 1, cv.LINE_AA)
-                # img.text(f'{rint(f.rect_area)}/{f.rect_ratio:.2f}', m.contour[0][0], FONT, .5, COLOR_WHITE)
+                img.text(f'{rint(f.box_area)}/{f.box_ratio:.2f}', f.contour[0][0], FONT, .5, COLOR_WHITE)
 
         return figures
 
@@ -186,7 +186,7 @@ class GaugeReader:
                 candidates.append(f)
                 del figures[i]
                 continue
-            if not 0.5 <= f.box_area / median <= 5.0:
+            if not 0.5 <= f.box_area / median <= 6.0:
                 del figures[i]
 
         # Debug: draw the accepted marks
@@ -283,42 +283,45 @@ class GaugeReader:
         # Interpolate a zero mark
         self.zero_angle = marks[0].loc_angle - avg_mark_delta
         cart_angle = marks[0].cart_angle + avg_mark_delta
-        marks.insert(0, Mark(point=cross(self.center, self.radius, cart_angle),
-                                 cart_angle=cart_angle, loc_angle=self.zero_angle))
+        mark = Mark(point=cross(self.center, self.radius, cart_angle), cart_angle=cart_angle, loc_angle=self.zero_angle)
+        marks_new = [mark]
 
         self.log.debug(f'Added a zero mark at angle {self.zero_angle}')
 
         # One mark may be missed because it is covered with the needle, so we need to interpolate it
-        for i, (a1, a2) in enumerate(pairwise(marks[:])):
+        for a1, a2 in pairwise(marks):
+            marks_new.append(a1)
             delta = a2.loc_angle - a1.loc_angle
             if not isclose(delta, avg_mark_delta, rel_tol=0.1):
                 d = delta / 2
                 cart_angle = a1.cart_angle - d
                 mark = Mark(point=cross(self.center, self.radius, cart_angle),
                             cart_angle=cart_angle, loc_angle=a1.loc_angle + d)
-                marks.insert(i + 1, mark)
+                marks_new.append(mark)
                 self.log.debug(f'Added a missing mark at angle {mark.loc_angle:.2f}')
+        else:
+            marks_new.append(a2)
 
         # Debug: draw the accepted marks
         with self.d.img(self.img_d, 'outline_dial/marks') as img:
-            for m in marks:
+            for m in marks_new:
                 #img.drawContours([m.box], -1, COLOR_YELLOW, 1, cv.LINE_AA)
                 img.circle(m.point, 3, COLOR_YELLOW, 1, cv.LINE_AA)
 
         # A basic check
-        if (_l := len(marks)) != (_n := rint(self.config.max_mark / self.config.mark_step)):
+        if (_l := len(marks_new)) != (_n := rint(self.config.max_mark / self.config.mark_step)):
             self.log.error(f'{_n} dial marks are expected but {_l} found')
             return None
 
         # Debug: draw the mark's axes
         with self.d.img(self.img_d, 'outline_dial/axes') as img:
-            for mark in marks:
+            for mark in marks_new:
                 color = COLOR_MAGENTA if mark.box is not None else COLOR_DARK_MAGENTA
                 img.line_polar(self.radius + 25, mark.cart_angle, self.center, color, 1)
                 img.text(text=f'{mark.loc_angle:.2f}', org=mark.point, fontFace=FONT, fontScale=0.5,
                          color=color, thickness=1, shift=(10, 5))
 
-        return marks
+        return marks_new
 
     def _generate_scale_table(self, marks):
         """
