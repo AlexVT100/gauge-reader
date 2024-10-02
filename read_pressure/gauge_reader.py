@@ -21,7 +21,7 @@ import numpy as np
 from .config import Config
 from .debug import Debug
 from .util import *
-
+from .version import VERSION
 
 class GaugeReader:
     """
@@ -57,6 +57,8 @@ class GaugeReader:
         self.radius: float = 0.0
         self.zero_angle: float = 0.0
 
+        self.version = f'Gauge Reader {VERSION}'
+
         #self.log.debug(f'opencv: {cv.__version__}')
         #self.log.debug(f'numpy: {np.__version__}')
 
@@ -64,6 +66,8 @@ class GaugeReader:
         """
         The main method that performs the recognition
         """
+        self.log.info(self.version)
+        cv.putText(self.img_d, self.version, (10, self.img_h - 10), FONT, 0.75, COLOR_BLACK, 1, cv.LINE_AA)
 
         # Preprocess the gauge image and outline it
         self._preproc_image()
