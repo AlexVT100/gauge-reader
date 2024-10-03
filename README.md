@@ -5,7 +5,7 @@ A script to read a value from the analog gauge.
 ## Project Goal
 
 I need to remotely monitor the coolant pressure in the heating system 
-in my house when I'm away and woild like to integrate the monitoring 
+in my house when I'm away and would like to integrate the monitoring 
 into [Tuya](https://www.tuya.com/) and/or
 [Home Assistant](https://www.home-assistant.io/).
 
