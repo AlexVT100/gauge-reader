@@ -2,13 +2,15 @@
 """
 Put the technical version of the last commit into read_pressure/version.py
 
-Copy this script to .git/hooks
+Change git's hook dir to .githooks:
+    git config core.hooksPath .githooks
 """
 import git
+import sys
 
 repo = git.Repo()
 version = repo.git.describe('--tags')
 
 with open('read_pressure/version.py', 'w+') as fd:
     fd.write(f'VERSION = "{version}"\n')
-    print(f'hooks/post-commit: version={version}')
+    print(f'{sys.argv[0]}: version={version}')
