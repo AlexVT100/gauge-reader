@@ -5,16 +5,16 @@ A script to read a value from the analog gauge.
 ## Project Goal
 
 I need to remotely monitor the coolant pressure in the heating system 
-in my house when I'm away. The sensor must be supported
-by ZigBee/[Tuya](https://www.tuya.com/) and/or
+in my house when I'm away and woild like to integrate the monitoring 
+into [Tuya](https://www.tuya.com/) and/or
 [Home Assistant](https://www.home-assistant.io/).
 
 It turned out that existing ready-made pressure measuring devices are
 industrial, so they cannot be connected to existing smart home solutions.
 
 However, I do not want to make a DIY sensor because it seems quite
-complicated (current loop, ZigBee/WiFi module, software etc.) and
-expensive. Therefore, I decided to monitor the analog pressure gauge with
+complicated (current loop, ZigBee/WiFi module, firmware etc.) and
+expensive. Instead, I decided to monitor the analog pressure gauge with
 a Wi-Fi camera.
 
 Obviosly, such a setup is enough for visual control of the pressure,
