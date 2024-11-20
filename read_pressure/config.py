@@ -25,8 +25,8 @@ Config = SimpleNamespace(
         blur=3,
         brightness=20,
         contrast=0,
-        lut_min=70,
-        lut_max=200,
+        lut_min=64,
+        lut_max=102,
         mean_sp=11,
         mean_sr=21,
         thresh=110,
@@ -37,7 +37,7 @@ Config = SimpleNamespace(
 
 MarkRatios = {
     None: {     # No erode
-        '0.0': [0.09, 0.29],
+        '0.0': [0.05, 0.25],
         #'0.1': [0.13, 0.23],
         #'0.5': [0.09, 0.12],
         #'1.0': [0.25, 0.27],

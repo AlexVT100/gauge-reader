@@ -163,7 +163,7 @@ class GaugeReader:
 
             if mark.box_area < 100:
                 continue
-            if not 0.09 <= mark.box_ratio <= 0.28:
+            if not 0.05 <= mark.box_ratio <= 0.25:
                 continue
 
             figures.append(mark)
@@ -180,6 +180,7 @@ class GaugeReader:
         """
 
         """
+        # Calculate the median of the areas of the marks
         median = np.median([f.box_area for f in figures])
         self.log.debug(f'Median of box areas is {median:.2f}')
 
@@ -187,10 +188,11 @@ class GaugeReader:
         for i in range(len(figures)-1, -1, -1):
             f = figures[i]
             if f.box_area / median > 150:
+                # A box with the area that is much larger than the median may be the needle
                 candidates.append(f)
                 del figures[i]
                 continue
-            if not 0.5 <= f.box_area / median <= 6.0:
+            if not 0.5 <= f.box_area / median <= 8.0:
                 del figures[i]
 
         # Debug: draw the accepted marks
