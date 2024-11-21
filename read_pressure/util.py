@@ -16,8 +16,19 @@ COLOR_CYAN = (255, 255, 0)
 
 FONT = cv.FONT_HERSHEY_SIMPLEX
 
+class Ranges:
+    def __init__(self, *args):
+        self.ranges = [arg for arg in args]
+        pass
 
-class Figure:
+    def in_range(self, value):
+        for vmin, vmax in self.ranges:
+            if vmin <= value <= vmax:
+                return True
+        return False
+
+
+class Contour:
     def __init__(self, contour):
         #self.point: tuple = point
 
@@ -30,6 +41,8 @@ class Figure:
         self.box = cv.boxPoints(rect).astype(int)
         self.box_ratio = min(dim_x, dim_y) / max(dim_x, dim_y)
         self.box_area = dim_x * dim_y
+
+        self.similarity = self.contour_area / self.box_area
 
         #self.cart_angle: float = cart_angle
         #self.loc_angle: float = loc_angle

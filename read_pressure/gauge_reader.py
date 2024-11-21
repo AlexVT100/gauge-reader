@@ -11,14 +11,15 @@ import datetime
 import os
 import os.path
 import shutil
+import sys
 from datetime import datetime
 from itertools import pairwise
 from math import isclose, degrees
-from sys import float_info
 
+import cv2
 import numpy as np
 
-from .config import Config
+from .config import Config, MarkSimilRange, MarkRatioRange, NeedleSimilRange, NeedleRatioRange
 from .debug import Debug
 from .util import *
 from .version import VERSION
@@ -39,7 +40,7 @@ class GaugeReader:
         self.d = Debug(log, no_im_show)
 
         # Load the gauge image
-        img = cv.imread(img_file)
+        img = cv2.imread(img_file)
         if img is None or img.size == 0:
             # self.log.error(f'Error reading file {img_file}.')
             raise RuntimeError(f'File {img_file} does not exist or is brokren')
@@ -59,7 +60,7 @@ class GaugeReader:
 
         self.version = f'Gauge Reader {VERSION}'
 
-        #self.log.debug(f'opencv: {cv.__version__}')
+        #self.log.debug(f'opencv: {cv2.__version__}')
         #self.log.debug(f'numpy: {np.__version__}')
 
     def exec(self) -> str | None:
@@ -67,7 +68,8 @@ class GaugeReader:
         The main method that performs the recognition
         """
         self.log.info(self.version)
-        cv.putText(self.img_d, self.version, (10, self.img_h - 10), FONT, 0.75, COLOR_BLACK, 1, cv.LINE_AA)
+        cv2.putText(self.img_d, self.version, (10, self.img_h - 10), FONT, 0.75, COLOR_BLACK, 1, cv2.LINE_AA)
+        self.log.info(f'Processing {self.img_file}')
 
         # Preprocess the gauge image and outline it
         self._preproc_image()
@@ -101,7 +103,7 @@ class GaugeReader:
         self.d.show(self.img, 'prep/orig')
 
         if self.config.scale.blur is not None:
-            self.img = cv.medianBlur(self.img, self.config.scale.blur)
+            self.img = cv2.medianBlur(self.img, self.config.scale.blur)
             self.d.show(self.img, 'prep/blur')
 
         if self.config.scale.brightness is not None:
@@ -121,115 +123,99 @@ class GaugeReader:
                 v = rint(255 / (self.config.scale.lut_max - self.config.scale.lut_min) * (i - self.config.scale.lut_min))
             lut[i] = v
 
-        self.img = cv.LUT(self.img, lut)
+        self.img = cv2.LUT(self.img, lut)
         self.d.show(self.img, 'prep/lut')
 
-        self.img = cv.pyrMeanShiftFiltering(self.img, self.config.scale.mean_sp, self.config.scale.mean_sr)
+        self.img = cv2.pyrMeanShiftFiltering(self.img, self.config.scale.mean_sp, self.config.scale.mean_sr)
         self.d.show(self.img, 'prep/mean')
 
 
         # Apply a threshold filter
-        # https://docs.opencv.org/4.x/d7/d4d/tutorial_py_thresholding.html
-        self.img = cv.cvtColor(self.img, cv.COLOR_BGR2GRAY)
-        self.img = cv.adaptiveThreshold(self.img, 255, cv.ADAPTIVE_THRESH_GAUSSIAN_C,
-                                            cv.THRESH_BINARY, 15, 4)
+        # https://docs.opencv2.org/4.x/d7/d4d/tutorial_py_thresholding.html
+        self.img = cv2.cvtColor(self.img, cv2.COLOR_BGR2GRAY)
+        self.img = cv2.adaptiveThreshold(self.img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                            cv2.THRESH_BINARY, 15, 4)
         self.d.show(self.img, 'prep/thresh')
 
         if self.config.scale.erode_iters is not None:
             kernel = np.ones((3, 3), np.uint8)
-            self.img = cv.dilate(self.img, kernel, iterations=self.config.scale.erode_iters)
+            self.img = cv2.dilate(self.img, kernel, iterations=self.config.scale.erode_iters)
             self.d.show(self.img, 'prep/erode')
 
     def _od_find_contours(self):
         """
 
         """
-        contours, _ = cv.findContours(self.img, mode=cv.RETR_LIST, method=cv.CHAIN_APPROX_SIMPLE)
+        contours, _ = cv2.findContours(self.img, mode=cv2.RETR_LIST, method=cv2.CHAIN_APPROX_SIMPLE)
         # cnts = cnts[0] if len(cnts) == 2 else cnts[1]
 
         # Debug: draw all found contours
         with self.d.img(self.img_d, 'outline_dial/all_contours') as img:
-            img.drawContours(contours, -1, COLOR_BLUE, 1, cv.LINE_AA)
+            img.drawContours(contours, -1, COLOR_BLUE, 1, cv2.LINE_AA)
 
         return contours
 
     def _od_select_contours(self, contours):
-        figures = []
+        """
+        Analyzes all found contours and sorts them into the marks and the needle
+        """
+        marks = []
+        needle: (Contour, None) = None
+        rejected = []
+
         for c in contours:
             if c.size < 8:
                 continue
 
-            mark = Figure(c)
+            contour = Contour(cv2.convexHull(c))
 
-            if mark.box_area < 100:
-                continue
-            if not 0.05 <= mark.box_ratio <= 0.25:
+            if contour.contour_area < 250:
                 continue
 
-            figures.append(mark)
+            if MarkSimilRange.in_range(contour.similarity) and MarkRatioRange.in_range(contour.box_ratio):
+                marks.append(contour)
+                continue
+
+            if NeedleSimilRange.in_range(contour.similarity) and NeedleRatioRange.in_range(contour.box_ratio):
+                if needle is None or needle.contour_area > contour.contour_area:
+                    needle = contour
+                    continue
+
+            # The contour is rejected; save for debugging
+            rejected.append(contour)
 
         # Debug: Draw accepted contours
         with self.d.img(self.img_d, 'outline_dial/accepted_contours') as img:
-            for f in figures:
-                img.drawContours([f.contour], -1, COLOR_BLUE, 1, cv.LINE_AA)
-                img.text(f'{rint(f.box_area)}/{f.box_ratio:.2f}', f.contour[0][0], FONT, .5, COLOR_WHITE)
+            if needle is not None:
+                img.drawContours([needle.contour], -1, COLOR_BLUE, 1, cv2.LINE_AA)
+                img.text(f'{needle.similarity:.4f}|{needle.box_ratio:.4f}', needle.center, FONT, .5, COLOR_WHITE)
+            for f in marks:
+                img.drawContours([f.contour], -1, COLOR_BLUE, 1, cv2.LINE_AA)
+                img.text(f'{f.similarity:.4f}|{f.box_ratio:.4f}', f.contour[0][0], FONT, .4, COLOR_WHITE)
 
-        return figures
+        # Debug: Draw rejected contours
+        with self.d.img(self.img_d, 'outline_dial/rejected_contours') as img:
+            for c in rejected:
+                img.drawContours([c.contour], -1, COLOR_BLUE, 1, cv2.LINE_AA)
+                img.text(f'{c.similarity:.4f}|{c.box_ratio:.4f}', c.contour[0][0], FONT, .4, COLOR_WHITE)
 
-    def _od_extract_needle(self, figures):
-        """
+        if needle is None:
+            self.log.error('The needle is not found.')
 
-        """
-        # Calculate the median of the areas of the marks
-        median = np.median([f.box_area for f in figures])
-        self.log.debug(f'Median of box areas is {median:.2f}')
-
-        candidates = []
-        for i in range(len(figures)-1, -1, -1):
-            f = figures[i]
-            if f.box_area / median > 150:
-                # A box with the area that is much larger than the median may be the needle
-                candidates.append(f)
-                del figures[i]
-                continue
-            if not 0.5 <= f.box_area / median <= 8.0:
-                del figures[i]
-
-        # Debug: draw the accepted marks
-        with self.d.img(self.img_d, 'outline_dial/accepted_marks') as img:
-            for f in figures:
-                img.drawContours([f.contour], -1, COLOR_BLUE, 1, cv.LINE_AA)
-                # img.text(f'{rint(f.rect_area)}/{f.rect_ratio:.2f}', m.contour[0][0], FONT, .5, COLOR_WHITE)
-
-        # Debug: Draw needle candidates
-        with self.d.img(self.img_d, 'outline_dial/needle_candidates') as img:
-            img.drawContours([f.contour for f in candidates], -1, COLOR_BLUE, 1, cv.LINE_AA)
-
-        #
-        min_area = float_info.max
-        needle_contour = None
-        for i, m in enumerate(candidates):
-            if m.contour_area < min_area:
-                min_area = m.contour_area
-                needle_contour = m
-
-        # Debug: draw the chosen needle contour
-        with self.d.img(self.img_d, 'outline_dial/needle_contour') as img:
-            img.drawContours([needle_contour.contour], -1, COLOR_YELLOW, 1, cv.LINE_AA)
-
-        return needle_contour
+        return marks, needle
 
     def _od_find_enclosing_circle(self, figures):
         """
         Find an enclosing circle for the center points of the selected rectangles
         """
         points = np.array([f.center for f in figures]).astype(int)
-        center, radius = cv.minEnclosingCircle(points)
+        center, radius = cv2.minEnclosingCircle(points)
+        center = (center[0] + Config.shaft_displacement[0], center[1] + Config.shaft_displacement[1])
 
         # Debug: Draw the enclosing circle
         with self.d.img(self.img_d, 'outline_dial/circle') as img:
-            img.circle(tuple(map(round, center)), rint(radius), COLOR_GREEN, 1, cv.LINE_AA)
-            img.circle(tuple(map(round, center)), 3, COLOR_GREEN, 1, cv.LINE_AA)
+            img.circle(tuple(map(round, center)), rint(radius), COLOR_GREEN, 1, cv2.LINE_AA)
+            img.circle(tuple(map(round, center)), 3, COLOR_GREEN, 1, cv2.LINE_AA)
 
         return center, radius
 
@@ -256,23 +242,22 @@ class GaugeReader:
             https://theailearner.com/2020/11/03/opencv-minimum-area-rectangle/
             https://stackoverflow.com/questions/15956124/minarearect-angles-unsure-about-the-angle-returned
             https://github.com/opencv/opencv/issues/19472
-            https://docs.opencv.org/4.x/d9/d8b/tutorial_py_contours_hierarchy.html
+            https://docs.opencv2.org/4.x/d9/d8b/tutorial_py_contours_hierarchy.html
             https://medium.com/analytics-vidhya/opencv-findcontours-detailed-guide-692ee19eeb18
         """
         # Find contours
         contours = self._od_find_contours()
 
         # Choose contours by their enclosing rectangle's proportions
-        figures = self._od_select_contours(contours)
-
-        # Extract large figures from the list and choose a needle among them
-        needle = self._od_extract_needle(figures)
+        marks, needle = self._od_select_contours(contours)
+        if marks is None or needle is None:
+            return marks, needle
 
         # Find an enclosing circle for the center points of the selected rectangles
-        self.center, self.radius = self._od_find_enclosing_circle(figures)
+        self.center, self.radius = self._od_find_enclosing_circle(marks)
 
         # Remove figures whose centers are not lying close to the circle
-        marks = self._od_remove_displaced_figs(figures)
+        marks = self._od_remove_displaced_figs(marks)
 
         # Sort the mark list by the loc_angle in the ascending order
         marks.sort(key=lambda e: e.loc_angle)
@@ -311,8 +296,8 @@ class GaugeReader:
         # Debug: draw the accepted marks
         with self.d.img(self.img_d, 'outline_dial/marks') as img:
             for m in marks_new:
-                #img.drawContours([m.box], -1, COLOR_YELLOW, 1, cv.LINE_AA)
-                img.circle(m.point, 3, COLOR_YELLOW, 1, cv.LINE_AA)
+                #img.drawContours([m.box], -1, COLOR_YELLOW, 1, cv2.LINE_AA)
+                img.circle(m.point, 3, COLOR_YELLOW, 1, cv2.LINE_AA)
 
         # A basic check
         if (_l := len(marks_new)) != (_n := rint(self.config.max_mark / self.config.mark_step)):
@@ -346,10 +331,10 @@ class GaugeReader:
         Find the needle tip
         """
         # Find an enclosing triangle for the contour
-        _, triangle = cv.minEnclosingTriangle(contour)
+        _, triangle = cv2.minEnclosingTriangle(contour)
 
         # Fit the line to the triangle to determine its angle
-        vx, vy, x, y = cv.fitLine(triangle, cv.DIST_L2, 0, 0.01, 0.01)
+        vx, vy, x, y = cv2.fitLine(triangle, cv2.DIST_L2, 0, 0.01, 0.01)
         vx, vy, x, y = vx[0], vy[0], rint(x[0]), rint(y[0])
 
         # Find two extreme points on the line to draw line
@@ -362,7 +347,7 @@ class GaugeReader:
         # Find the needle tip point
         tip = self._find_needle_tip(triangle, axis)
 
-        # The vector returned by cv.fitLine() is always in range (90°, -90°)
+        # The vector returned by cv2.fitLine() is always in range (90°, -90°)
         # in the image's coordinate system ( 0 ≤ x ≤ 1>, -1 ≤ y ≤ 1)
         # so we need to take into account the tip position to determine the line direction
         angle = degrees(atan2(-vy, vx))
@@ -372,8 +357,8 @@ class GaugeReader:
         self.log.debug(f'measured needle angle: {angle:.6f}°')
 
         with self.d.img(self.img_d, 'measure_needle/axis') as img:
-            img.line(axis.p1, axis.p2, COLOR_RED, 1, cv.LINE_AA)
-            img.circle((x, y), 3, COLOR_RED, 1, cv.LINE_AA)
+            img.line(axis.p1, axis.p2, COLOR_RED, 1, cv2.LINE_AA)
+            img.circle((x, y), 3, COLOR_RED, 1, cv2.LINE_AA)
 
         with self.d.img(self.img_d, 'measure_needle/triangle'):
             img.polylines([np.int32(triangle)], True, COLOR_YELLOW, 1)
@@ -437,7 +422,7 @@ class GaugeReader:
             save_dir = path
         file_name = f'{save_dir}/{name}{suffix}{ext}'
 
-        cv.imwrite(file_name, self.img_d)
+        cv2.imwrite(file_name, self.img_d)
 
         stat = os.stat(self.img_file)
         os.utime(file_name, (stat.st_atime, stat.st_mtime))

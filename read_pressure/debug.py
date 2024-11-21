@@ -19,9 +19,7 @@ debug_conf = {
     'outline_dial': {
         'all_contours':         0,
         'accepted_contours':    0,
-        'accepted_marks':       0,
-        'needle_candidates':    0,
-        'needle_contour':       0,
+        'rejected_contours':    0,
         'circle':               1,
         'marks':                1,
         'axes':                 0,
@@ -32,7 +30,7 @@ debug_conf = {
     },
 
     'exec': {
-        'values':            2,
+        'values':            1,
     },
 }
 
