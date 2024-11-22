@@ -242,7 +242,7 @@ class GaugeReader:
             https://theailearner.com/2020/11/03/opencv-minimum-area-rectangle/
             https://stackoverflow.com/questions/15956124/minarearect-angles-unsure-about-the-angle-returned
             https://github.com/opencv/opencv/issues/19472
-            https://docs.opencv2.org/4.x/d9/d8b/tutorial_py_contours_hierarchy.html
+            https://docs.opencv.org/4.x/d9/d8b/tutorial_py_contours_hierarchy.html
             https://medium.com/analytics-vidhya/opencv-findcontours-detailed-guide-692ee19eeb18
         """
         # Find contours
@@ -296,8 +296,7 @@ class GaugeReader:
         # Debug: draw the accepted marks
         with self.d.img(self.img_d, 'outline_dial/marks') as img:
             for m in marks_new:
-                #img.drawContours([m.box], -1, COLOR_YELLOW, 1, cv2.LINE_AA)
-                img.circle(m.point, 3, COLOR_YELLOW, 1, cv2.LINE_AA)
+                img.circle(m.point, 3, COLOR_GREEN, 1, cv2.LINE_AA)
 
         # A basic check
         if (_l := len(marks_new)) != (_n := rint(self.config.max_mark / self.config.mark_step)):
@@ -316,7 +315,12 @@ class GaugeReader:
 
     def _generate_scale_table(self, marks):
         """
+        Generates a dict representing the scale:
 
+            scale[angle: float] = value: float
+
+        Each record represents a recognized mark. The angles are relative
+        to the first mark thus angles start from zero.
         """
         scale = {0.0: self.config.mark_step}
         value = self.config.first_mark
@@ -408,6 +412,14 @@ class GaugeReader:
         #     return 0.0
 
         self.log.debug(f'calculated value: {value:.4f}')
+
+        # Debug: draw the approximated "microscale" between the two marks
+        with self.d.img(self.img_d, 'calculate_value/microscale') as img:
+            da = (a2 - a1) / (self.config.mark_step * 100)
+            while a1 <= a2 * 1.001:
+                point = cross(self.center, self.radius + 8, (a := 270 - self.zero_angle - a1))
+                img.line_polar(10, a, point, COLOR_GREEN, 1, cv2.LINE_AA)
+                a1 += da
 
         return value
 

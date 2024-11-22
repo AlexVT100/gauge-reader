@@ -28,9 +28,11 @@ debug_conf = {
         'axis':              1,
         'triangle':          1,
     },
-
+    'calculate_value': {
+        'microscale':        1,
+    },
     'exec': {
-        'values':            1,
+        'values':            2,
     },
 }
 
