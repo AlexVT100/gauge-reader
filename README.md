@@ -71,18 +71,18 @@ The original camera snapshot:
 ![gauge.png](docs/gauge.png)
 
 ```sh
-$ python3.12 run.py --debug images/gauge.png
+/usr/bin/python3.12 /data1/Projects/SmartHome/pressure_reader/git/run.py --debug --save-debug-image images/gauge.png 
+INFO: Reading mode
+INFO: Gauge Reader v3.0.0-3-g6014b46
 INFO: Processing images/gauge.png
-INFO: Gauge Reader 2.0.2-2-gf03f15d
-DEBUG: Median of box areas is 531.92
 DEBUG: Average angle between marks: 6.92
-DEBUG: Added a zero mark at angle 43.19745304001033
-DEBUG: Added a missing mark at angle 160.93
-DEBUG: measured needle angle: 110.908380°
-DEBUG: needle angle: absolute 110.908380°, relative 115.894167°
-DEBUG: calculated value: 1.7737
+DEBUG: Added a zero mark at angle 45.32169632249996
+DEBUG: Added a missing mark at angle 141.72
+DEBUG: Measured needle angle: 130.770094° (cartesian)
+DEBUG: needle angle: absolute 130.770094°, relative 93.908209°
+DEBUG: calculated value: 1.4640
 DEBUG: Debug image saved as "images/gauge-debug.png"
-INFO: value: 1.77
+INFO: value: 1.46
 ```
 
 The image with some debugging drawings:
