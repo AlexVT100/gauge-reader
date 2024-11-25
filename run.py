@@ -15,15 +15,35 @@ from read_pressure.gauge_reader import GaugeReader
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('image_list', nargs='?', action='append')
-    parser.add_argument('--save-debug-image', '-sdi', dest='save_debug_image', action='store_true')
-    parser.add_argument('--save-dir', '-sd', nargs=1, dest='save_dir')
+    parser.add_argument('image_list',
+                        help='The list of images to be read',
+                        nargs='?', action='append')
+    parser.add_argument('--save-debug-image', '-sdi',
+                        help='Save the original image with debug drawings over it',
+                        dest='save_debug_image', action='store_true')
+    parser.add_argument('--save-dir', '-sd',
+                        help='Directory to save debug images into. Works only with --save-debug-image. '
+                             'Default is the directory of the current image',
+                        nargs=1, dest='save_dir')
     parser.add_argument('--csv-file', dest='csv_file')
-    test_grp = parser.add_argument_group('Test mode', 'All options in this group must be used together')
-    test_grp.add_argument('--test-image-dir', '-td', metavar='DIR', dest='test_image_dir')
-    test_grp.add_argument('--test-image-prefix', '-tp', metavar='PREFIX', dest='test_image_prefix')
-    test_grp.add_argument('--test-image-suffix', '-ts', metavar='SUFFIX', dest='test_image_suffix')
-    parser.add_argument('--debug', dest='debug', action='store_true')
+    test_grp = parser.add_argument_group(
+        'Test mode',
+        'All options in this group must be used together. '
+        'A file name is constructed as "<DIR>/<PREFIX>P.PP[-V]<SUFFIX>", '
+        'where P.PP is an expected pressure value and V -- a decimal '
+        'number (optional).')
+    test_grp.add_argument('--test-image-dir', '-td',
+                          help='Read test images from the specified directory',
+                          metavar='DIR', dest='test_image_dir')
+    test_grp.add_argument('--test-image-prefix', '-tp',
+                          help='A prefix of the image file name, e. g. "gauge-"',
+                          metavar='PREFIX', dest='test_image_prefix')
+    test_grp.add_argument('--test-image-suffix', '-ts',
+                          help='A suffix of the image file name, e. g. ".png"',
+                          metavar='SUFFIX', dest='test_image_suffix')
+    parser.add_argument('--debug',
+                        help='Enables debug output',
+                        dest='debug', action='store_true')
     opts = parser.parse_args()
 
     logging.basicConfig(format='%(levelname)s: %(message)s')
@@ -57,7 +77,7 @@ if __name__ == '__main__':
         images = opts.image_list
 
     for image in images:
-        reader = GaugeReader(log, image)
+        reader = GaugeReader(log, image, no_im_show=test_mode)
         value = reader.exec()
 
         if opts.save_debug_image:
