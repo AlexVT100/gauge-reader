@@ -93,8 +93,3 @@ The image with some debugging drawings:
 
 * The script's would give a wrong result or crash when
   the needle is around zero.
-* Some readings seem to be incorrect in the second decimal digit after comma.
-
-## TODO
-
-* Collect testing images and implement a testing mode.
