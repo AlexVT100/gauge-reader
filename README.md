@@ -32,7 +32,10 @@ After a lot of experiments with the built-in manometer (by Baxi) [picture will f
 of colorful sectors, no marks and a low-contrast grey needle I realized that
 a gauge must have as simple and contrast dial as possible. Finally, I settled on
 an ICMA 244 manometer that is widely available, relatively cheap and has
-a clean minimalistic design. 
+a clean minimalistic design.
+
+![icma-244.jpg](docs/icma-244.jpg)
+
 
 ### Camera
 
