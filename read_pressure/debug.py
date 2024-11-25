@@ -49,6 +49,8 @@ class DebugImage:
 
     def line(self, pt1, pt2, color, thickness=None, line_type=cv2.LINE_AA, shift=None) -> None:
         if self.mode >= 1:
+            pt1 = (rint(pt1[0]), rint(pt1[1]))
+            pt2 = (rint(pt2[0]), rint(pt2[1]))
             cv.line(self._img, pt1, pt2, color, thickness, line_type, shift)
 
     def circle(self, center, radius, color, thickness=None, line_type=cv2.LINE_AA, shift=None) -> None:

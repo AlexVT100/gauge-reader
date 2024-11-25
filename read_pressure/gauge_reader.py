@@ -11,13 +11,11 @@ import datetime
 import os
 import os.path
 import shutil
-import sys
 from datetime import datetime
 from itertools import pairwise
-from math import isclose, degrees
+from math import isclose
 
 import cv2
-import numpy as np
 
 from .config import Config, MarkSimilRange, MarkRatioRange, NeedleSimilRange, NeedleRatioRange
 from .debug import Debug
@@ -337,53 +335,33 @@ class GaugeReader:
         # Find an enclosing triangle for the contour
         _, triangle = cv2.minEnclosingTriangle(contour)
 
-        # Fit the line to the triangle to determine its angle
-        vx, vy, x, y = cv2.fitLine(triangle, cv2.DIST_L2, 0, 0.01, 0.01)
-        vx, vy, x, y = vx[0], vy[0], rint(x[0]), rint(y[0])
+        # Find the needle tip, i.e. a triangle vertex with the minimum angle
+        min_angle = 180.0
+        tip = None
+        for i1, ic, i2 in ((0, 1, 2), (1, 2, 0), (2, 0, 1)):
+            p1, c, p2 = triangle[i1][0], triangle[ic][0], triangle[i2][0]
+            angle = angle3p(p1, c, p2)
+            if min_angle > angle:
+                min_angle = angle
+                tip = Point(c[0], c[1])
 
-        # Find two extreme points on the line to draw line
-        lefty = rint((-x * vy / vx) + y)
-        righty = rint(((self.img_w - x) * vy / vx) + y)
+        # The needle axis goes through the scale center and the needle tip
+        axis = Line(tip, self.center)
 
-        # Build the needle axis line
-        axis = Line(Point(0, lefty), Point(self.img_w - 1, righty))
+        # Calculate the cartesian angle on the axis
+        angle = angle360(self.center, tip)
 
-        # Find the needle tip point
-        tip = self._find_needle_tip(triangle, axis)
-
-        # The vector returned by cv2.fitLine() is always in range (90°, -90°)
-        # in the image's coordinate system ( 0 ≤ x ≤ 1>, -1 ≤ y ≤ 1)
-        # so we need to take into account the tip position to determine the line direction
-        angle = degrees(atan2(-vy, vx))
-        if tip.x < x:
-            angle += 180
-
-        self.log.debug(f'measured needle angle: {angle:.6f}°')
+        self.log.debug(f'Measured needle angle: {angle:.6f}° (cartesian)')
 
         with self.d.img(self.img_d, 'measure_needle/axis') as img:
             img.line(axis.p1, axis.p2, COLOR_RED, 1, cv2.LINE_AA)
-            img.circle((x, y), 3, COLOR_RED, 1, cv2.LINE_AA)
+            #img.circle(tip, 3, COLOR_RED, 1, cv2.LINE_AA)
 
         with self.d.img(self.img_d, 'measure_needle/triangle'):
             img.polylines([np.int32(triangle)], True, COLOR_YELLOW, 1)
-            img.circle(tip, 3, COLOR_YELLOW, 1)
+            #img.circle(tip, 3, COLOR_YELLOW, 1)
 
         return angle
-
-    @staticmethod
-    def _find_needle_tip(contour: np.ndarray, line: Line) -> Point:
-        """
-        Find and return a contour's vertex closest to a line
-
-        https://stackoverflow.com/questions/39840030/distance-between-point-and-a-line-from-two-points
-        """
-        lp1 = np.array(line.p1)
-        lp2 = np.array(line.p2)
-
-        dist = np.abs((np.cross(lp2 - lp1, lp1 - contour)) / np.linalg.norm(lp2 - lp1))
-        min_idx = np.argmin(dist)
-
-        return Point(rint(contour[min_idx][0][0]), rint(contour[min_idx][0][1]))
 
     def _calculate_value(self, abs_angle: float) -> (float | None):
         """
@@ -416,10 +394,12 @@ class GaugeReader:
         # Debug: draw the approximated "microscale" between the two marks
         with self.d.img(self.img_d, 'calculate_value/microscale') as img:
             da = (a2 - a1) / (self.config.mark_step * 100)
+            n = 0
             while a1 <= a2 * 1.001:
                 point = cross(self.center, self.radius + 8, (a := 270 - self.zero_angle - a1))
-                img.line_polar(10, a, point, COLOR_GREEN, 1, cv2.LINE_AA)
+                img.line_polar(10 if n % 5 == 0 else 5, a, point, COLOR_GREEN, 1, cv2.LINE_AA)
                 a1 += da
+                n += 1
 
         return value
 

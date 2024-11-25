@@ -1,7 +1,8 @@
 from collections import namedtuple
-from math import atan2, pi, sin, cos, radians
+from math import atan2, pi, sin, cos, radians, degrees
 
 import cv2 as cv
+import numpy as np
 
 # Colors are BGR
 COLOR_WHITE = (255, 255, 255)
@@ -104,6 +105,20 @@ def angle360(p1, p2):
 
 def cart_angle_to_loc(angle):
     return 270 - angle if angle <= 270 else 270 - angle + 360
+
+
+def angle3p(p1: np.array, c: np.array, p2: np.array) -> float:
+    """
+    Calculate the cartesian angle between two intersecting lines (p1, c) and (p2, c) defined as three points
+
+    Link:
+        https://manivannan-ai.medium.com/find-the-angle-between-three-points-from-2d-using-python-348c513e2cd
+    """
+    b1 = p1 - c
+    b2 = p2 - c
+
+    cosine_angle = np.dot(b1, b2) / (np.linalg.norm(b1) * np.linalg.norm(b2))
+    return np.degrees(np.arccos(cosine_angle))
 
 
 def bright_contr(img, brightness=0, contrast=0):
