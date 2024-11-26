@@ -28,11 +28,15 @@ All of the above led to the emergence of this project.
 
 ### Pressure Gauge
 
-After a lot of experiments with the built-in manometer (by Baxi) [picture will follow] that has a bunch
-of colorful sectors, no marks and a low-contrast grey needle I realized that
-a gauge must have as simple and contrast dial as possible. Finally, I settled on
-an ICMA 244 manometer that is widely available, relatively cheap and has
-a clean minimalistic design.
+After a lot of experiments with the built-in manometer (by Baxi)
+that has a bunch of colorful sectors, no marks and a low-contrast
+grey needle, I realized that a gauge must have as simple and
+contrast dial as possible.
+
+![baxi.png](docs/baxi.png)
+
+Finally, I settled on an ICMA 244 manometer that is widely available,
+relatively cheap and has a clean minimalistic design.
 
 ![icma-244.jpg](docs/icma-244.jpg)
 
