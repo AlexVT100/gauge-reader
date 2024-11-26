@@ -28,7 +28,7 @@ All of the above led to the emergence of this project.
 
 ### Pressure Gauge
 
-After a lot of experiments with the built-in manometer (by Baxi)
+After a lot of (unseccessful) experiments with the built-in manometer (by Baxi)
 that has a bunch of colorful sectors, no marks and a low-contrast
 grey needle, I realized that a gauge must have as simple and
 contrast dial as possible.
@@ -45,7 +45,7 @@ relatively cheap and has a clean minimalistic design.
 
 After some investigation, I settled on
 [Ifeel Vega IFS-CI004](https://www.amazon.co.uk/Ifeel-Surveillance-IFS-CI004-Bi-directional-Compatible/dp/B0B9XWWRKW)
-Wi-Fi camera. The main reason was that its diaeter is very close to the diameter
+Wi-Fi camera. The main reason was that its diameter is very close to the diameter
 of the manometer. Also, it supports ONVIF and RTSP protocols.
 
 
