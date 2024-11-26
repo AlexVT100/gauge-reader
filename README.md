@@ -42,7 +42,7 @@ a clean minimalistic design.
 After some investigation, I settled on
 [Ifeel Vega IFS-CI004](https://www.amazon.co.uk/Ifeel-Surveillance-IFS-CI004-Bi-directional-Compatible/dp/B0B9XWWRKW)
 Wi-Fi camera. The main reason was that its diaeter is very close to the diameter
-of the manometer. Then, it supports ONVIF and RTSP protocols.
+of the manometer. Also, it supports ONVIF and RTSP protocols.
 
 
 ### Assembly
@@ -62,10 +62,17 @@ Python 3.12 is required.
 
 [will follow soon]
 
-### Running "in the wild"
+### Running in a terminal
 
-[will follow soon]
+In the reading mode:
+```shell
+./run.py --debug --save-debug-image images/gauge.png 
+```
 
+In the test mode:
+```shell
+./run.py --test-mode "images/testing/gauge-{V}.(png|jpg)"
+```
 
 ## Example
 
